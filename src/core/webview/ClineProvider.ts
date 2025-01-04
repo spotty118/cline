@@ -200,28 +200,43 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	async initClineWithTask(task?: string, images?: string[]) {
-		await this.clearTask() // ensures that an exising task doesn't exist before starting a new one, although this shouldn't be possible since user must clear task before starting a new one
-		const { apiConfiguration, customInstructions, autoApprovalSettings } = await this.getState()
-		this.cline = new Cline(this, apiConfiguration, autoApprovalSettings, customInstructions, task, images)
+		try {
+			await this.clearTask() // ensures that an exising task doesn't exist before starting a new one, although this shouldn't be possible since user must clear task before starting a new one
+			const { apiConfiguration, customInstructions, autoApprovalSettings } = await this.getState()
+			this.cline = new Cline(this, apiConfiguration, autoApprovalSettings, customInstructions, task, images)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error initializing Cline with task: ${error.message}`)
+			throw error
+		}
 	}
 
 	async initClineWithHistoryItem(historyItem: HistoryItem) {
-		await this.clearTask()
-		const { apiConfiguration, customInstructions, autoApprovalSettings } = await this.getState()
-		this.cline = new Cline(
-			this,
-			apiConfiguration,
-			autoApprovalSettings,
-			customInstructions,
-			undefined,
-			undefined,
-			historyItem,
-		)
+		try {
+			await this.clearTask()
+			const { apiConfiguration, customInstructions, autoApprovalSettings } = await this.getState()
+			this.cline = new Cline(
+				this,
+				apiConfiguration,
+				autoApprovalSettings,
+				customInstructions,
+				undefined,
+				undefined,
+				historyItem,
+			)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error initializing Cline with history item: ${error.message}`)
+			throw error
+		}
 	}
 
 	// Send any JSON serializable data to the react app
 	async postMessageToWebview(message: ExtensionMessage) {
-		await this.view?.webview.postMessage(message)
+		try {
+			await this.view?.webview.postMessage(message)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error posting message to webview: ${error.message}`)
+			throw error
+		}
 	}
 
 	/**
@@ -314,208 +329,213 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	private setWebviewMessageListener(webview: vscode.Webview) {
 		webview.onDidReceiveMessage(
 			async (message: WebviewMessage) => {
-				switch (message.type) {
-					case "webviewDidLaunch":
-						this.postStateToWebview()
-						this.workspaceTracker?.initializeFilePaths() // don't await
-						getTheme().then((theme) =>
-							this.postMessageToWebview({ type: "theme", text: JSON.stringify(theme) }),
-						)
-						// post last cached models in case the call to endpoint fails
-						this.readOpenRouterModels().then((openRouterModels) => {
-							if (openRouterModels) {
-								this.postMessageToWebview({ type: "openRouterModels", openRouterModels })
-							}
-						})
-						// gui relies on model info to be up-to-date to provide the most accurate pricing, so we need to fetch the latest details on launch.
-						// we do this for all users since many users switch between api providers and if they were to switch back to openrouter it would be showing outdated model info if we hadn't retrieved the latest at this point
-						// (see normalizeApiConfiguration > openrouter)
-						this.refreshOpenRouterModels().then(async (openRouterModels) => {
-							if (openRouterModels) {
-								// update model info in state (this needs to be done here since we don't want to update state while settings is open, and we may refresh models there)
-								const { apiConfiguration } = await this.getState()
-								if (apiConfiguration.openRouterModelId) {
-									await this.updateGlobalState(
-										"openRouterModelInfo",
-										openRouterModels[apiConfiguration.openRouterModelId],
-									)
-									await this.postStateToWebview()
+				try {
+					switch (message.type) {
+						case "webviewDidLaunch":
+							this.postStateToWebview()
+							this.workspaceTracker?.initializeFilePaths() // don't await
+							getTheme().then((theme) =>
+								this.postMessageToWebview({ type: "theme", text: JSON.stringify(theme) }),
+							)
+							// post last cached models in case the call to endpoint fails
+							this.readOpenRouterModels().then((openRouterModels) => {
+								if (openRouterModels) {
+									this.postMessageToWebview({ type: "openRouterModels", openRouterModels })
+								}
+							})
+							// gui relies on model info to be up-to-date to provide the most accurate pricing, so we need to fetch the latest details on launch.
+							// we do this for all users since many users switch between api providers and if they were to switch back to openrouter it would be showing outdated model info if we hadn't retrieved the latest at this point
+							// (see normalizeApiConfiguration > openrouter)
+							this.refreshOpenRouterModels().then(async (openRouterModels) => {
+								if (openRouterModels) {
+									// update model info in state (this needs to be done here since we don't want to update state while settings is open, and we may refresh models there)
+									const { apiConfiguration } = await this.getState()
+									if (apiConfiguration.openRouterModelId) {
+										await this.updateGlobalState(
+											"openRouterModelInfo",
+											openRouterModels[apiConfiguration.openRouterModelId],
+										)
+										await this.postStateToWebview()
+									}
+								}
+							})
+							break
+						case "newTask":
+							// Code that should run in response to the hello message command
+							//vscode.window.showInformationMessage(message.text!)
+
+							// Send a message to our webview.
+							// You can send any JSON serializable data.
+							// Could also do this in extension .ts
+							//this.postMessageToWebview({ type: "text", text: `Extension: ${Date.now()}` })
+							// initializing new instance of Cline will make sure that any agentically running promises in old instance don't affect our new task. this essentially creates a fresh slate for the new task
+							await this.initClineWithTask(message.text, message.images)
+							break
+						case "apiConfiguration":
+							if (message.apiConfiguration) {
+								const {
+									apiProvider,
+									apiModelId,
+									apiKey,
+									openRouterApiKey,
+									awsAccessKey,
+									awsSecretKey,
+									awsSessionToken,
+									awsRegion,
+									awsUseCrossRegionInference,
+									vertexProjectId,
+									vertexRegion,
+									openAiBaseUrl,
+									openAiApiKey,
+									openAiModelId,
+									ollamaModelId,
+									ollamaBaseUrl,
+									lmStudioModelId,
+									lmStudioBaseUrl,
+									anthropicBaseUrl,
+									geminiApiKey,
+									openAiNativeApiKey,
+									deepSeekApiKey,
+									azureApiVersion,
+									openRouterModelId,
+									openRouterModelInfo,
+								} = message.apiConfiguration
+								await this.updateGlobalState("apiProvider", apiProvider)
+								await this.updateGlobalState("apiModelId", apiModelId)
+								await this.storeSecret("apiKey", apiKey)
+								await this.storeSecret("openRouterApiKey", openRouterApiKey)
+								await this.storeSecret("awsAccessKey", awsAccessKey)
+								await this.storeSecret("awsSecretKey", awsSecretKey)
+								await this.storeSecret("awsSessionToken", awsSessionToken)
+								await this.updateGlobalState("awsRegion", awsRegion)
+								await this.updateGlobalState("awsUseCrossRegionInference", awsUseCrossRegionInference)
+								await this.updateGlobalState("vertexProjectId", vertexProjectId)
+								await this.updateGlobalState("vertexRegion", vertexRegion)
+								await this.updateGlobalState("openAiBaseUrl", openAiBaseUrl)
+								await this.storeSecret("openAiApiKey", openAiApiKey)
+								await this.updateGlobalState("openAiModelId", openAiModelId)
+								await this.updateGlobalState("ollamaModelId", ollamaModelId)
+								await this.updateGlobalState("ollamaBaseUrl", ollamaBaseUrl)
+								await this.updateGlobalState("lmStudioModelId", lmStudioModelId)
+								await this.updateGlobalState("lmStudioBaseUrl", lmStudioBaseUrl)
+								await this.updateGlobalState("anthropicBaseUrl", anthropicBaseUrl)
+								await this.storeSecret("geminiApiKey", geminiApiKey)
+								await this.storeSecret("openAiNativeApiKey", openAiNativeApiKey)
+								await this.storeSecret("deepSeekApiKey", deepSeekApiKey)
+								await this.updateGlobalState("azureApiVersion", azureApiVersion)
+								await this.updateGlobalState("openRouterModelId", openRouterModelId)
+								await this.updateGlobalState("openRouterModelInfo", openRouterModelInfo)
+								if (this.cline) {
+									this.cline.api = buildApiHandler(message.apiConfiguration)
 								}
 							}
-						})
-						break
-					case "newTask":
-						// Code that should run in response to the hello message command
-						//vscode.window.showInformationMessage(message.text!)
-
-						// Send a message to our webview.
-						// You can send any JSON serializable data.
-						// Could also do this in extension .ts
-						//this.postMessageToWebview({ type: "text", text: `Extension: ${Date.now()}` })
-						// initializing new instance of Cline will make sure that any agentically running promises in old instance don't affect our new task. this essentially creates a fresh slate for the new task
-						await this.initClineWithTask(message.text, message.images)
-						break
-					case "apiConfiguration":
-						if (message.apiConfiguration) {
-							const {
-								apiProvider,
-								apiModelId,
-								apiKey,
-								openRouterApiKey,
-								awsAccessKey,
-								awsSecretKey,
-								awsSessionToken,
-								awsRegion,
-								awsUseCrossRegionInference,
-								vertexProjectId,
-								vertexRegion,
-								openAiBaseUrl,
-								openAiApiKey,
-								openAiModelId,
-								ollamaModelId,
-								ollamaBaseUrl,
-								lmStudioModelId,
-								lmStudioBaseUrl,
-								anthropicBaseUrl,
-								geminiApiKey,
-								openAiNativeApiKey,
-								deepSeekApiKey,
-								azureApiVersion,
-								openRouterModelId,
-								openRouterModelInfo,
-							} = message.apiConfiguration
-							await this.updateGlobalState("apiProvider", apiProvider)
-							await this.updateGlobalState("apiModelId", apiModelId)
-							await this.storeSecret("apiKey", apiKey)
-							await this.storeSecret("openRouterApiKey", openRouterApiKey)
-							await this.storeSecret("awsAccessKey", awsAccessKey)
-							await this.storeSecret("awsSecretKey", awsSecretKey)
-							await this.storeSecret("awsSessionToken", awsSessionToken)
-							await this.updateGlobalState("awsRegion", awsRegion)
-							await this.updateGlobalState("awsUseCrossRegionInference", awsUseCrossRegionInference)
-							await this.updateGlobalState("vertexProjectId", vertexProjectId)
-							await this.updateGlobalState("vertexRegion", vertexRegion)
-							await this.updateGlobalState("openAiBaseUrl", openAiBaseUrl)
-							await this.storeSecret("openAiApiKey", openAiApiKey)
-							await this.updateGlobalState("openAiModelId", openAiModelId)
-							await this.updateGlobalState("ollamaModelId", ollamaModelId)
-							await this.updateGlobalState("ollamaBaseUrl", ollamaBaseUrl)
-							await this.updateGlobalState("lmStudioModelId", lmStudioModelId)
-							await this.updateGlobalState("lmStudioBaseUrl", lmStudioBaseUrl)
-							await this.updateGlobalState("anthropicBaseUrl", anthropicBaseUrl)
-							await this.storeSecret("geminiApiKey", geminiApiKey)
-							await this.storeSecret("openAiNativeApiKey", openAiNativeApiKey)
-							await this.storeSecret("deepSeekApiKey", deepSeekApiKey)
-							await this.updateGlobalState("azureApiVersion", azureApiVersion)
-							await this.updateGlobalState("openRouterModelId", openRouterModelId)
-							await this.updateGlobalState("openRouterModelInfo", openRouterModelInfo)
-							if (this.cline) {
-								this.cline.api = buildApiHandler(message.apiConfiguration)
-							}
-						}
-						await this.postStateToWebview()
-						break
-					case "customInstructions":
-						await this.updateCustomInstructions(message.text)
-						break
-					case "autoApprovalSettings":
-						if (message.autoApprovalSettings) {
-							await this.updateGlobalState("autoApprovalSettings", message.autoApprovalSettings)
-							if (this.cline) {
-								this.cline.autoApprovalSettings = message.autoApprovalSettings
-							}
 							await this.postStateToWebview()
-						}
-						break
-					case "askResponse":
-						this.cline?.handleWebviewAskResponse(message.askResponse!, message.text, message.images)
-						break
-					case "clearTask":
-						// newTask will start a new task with a given task text, while clear task resets the current session and allows for a new task to be started
-						await this.clearTask()
-						await this.postStateToWebview()
-						break
-					case "didShowAnnouncement":
-						await this.updateGlobalState("lastShownAnnouncementId", this.latestAnnouncementId)
-						await this.postStateToWebview()
-						break
-					case "selectImages":
-						const images = await selectImages()
-						await this.postMessageToWebview({ type: "selectedImages", images })
-						break
-					case "exportCurrentTask":
-						const currentTaskId = this.cline?.taskId
-						if (currentTaskId) {
-							this.exportTaskWithId(currentTaskId)
-						}
-						break
-					case "showTaskWithId":
-						this.showTaskWithId(message.text!)
-						break
-					case "deleteTaskWithId":
-						this.deleteTaskWithId(message.text!)
-						break
-					case "exportTaskWithId":
-						this.exportTaskWithId(message.text!)
-						break
-					case "resetState":
-						await this.resetState()
-						break
-					case "requestOllamaModels":
-						const ollamaModels = await this.getOllamaModels(message.text)
-						this.postMessageToWebview({ type: "ollamaModels", ollamaModels })
-						break
-					case "requestLmStudioModels":
-						const lmStudioModels = await this.getLmStudioModels(message.text)
-						this.postMessageToWebview({ type: "lmStudioModels", lmStudioModels })
-						break
-					case "refreshOpenRouterModels":
-						await this.refreshOpenRouterModels()
-						break
-					case "openImage":
-						openImage(message.text!)
-						break
-					case "openFile":
-						openFile(message.text!)
-						break
-					case "openMention":
-						openMention(message.text)
-						break
-					case "cancelTask":
-						if (this.cline) {
-							const { historyItem } = await this.getTaskWithId(this.cline.taskId)
-							this.cline.abortTask()
-							await pWaitFor(() => this.cline === undefined || this.cline.didFinishAborting, {
-								timeout: 3_000,
-							}).catch(() => {
-								console.error("Failed to abort task")
-							})
-							if (this.cline) {
-								// 'abandoned' will prevent this cline instance from affecting future cline instance gui. this may happen if its hanging on a streaming request
-								this.cline.abandoned = true
+							break
+						case "customInstructions":
+							await this.updateCustomInstructions(message.text)
+							break
+						case "autoApprovalSettings":
+							if (message.autoApprovalSettings) {
+								await this.updateGlobalState("autoApprovalSettings", message.autoApprovalSettings)
+								if (this.cline) {
+									this.cline.autoApprovalSettings = message.autoApprovalSettings
+								}
+								await this.postStateToWebview()
 							}
-							await this.initClineWithHistoryItem(historyItem) // clears task again, so we need to abortTask manually above
-							// await this.postStateToWebview() // new Cline instance will post state when it's ready. having this here sent an empty messages array to webview leading to virtuoso having to reload the entire list
-						}
+							break
+						case "askResponse":
+							this.cline?.handleWebviewAskResponse(message.askResponse!, message.text, message.images)
+							break
+						case "clearTask":
+							// newTask will start a new task with a given task text, while clear task resets the current session and allows for a new task to be started
+							await this.clearTask()
+							await this.postStateToWebview()
+							break
+						case "didShowAnnouncement":
+							await this.updateGlobalState("lastShownAnnouncementId", this.latestAnnouncementId)
+							await this.postStateToWebview()
+							break
+						case "selectImages":
+							const images = await selectImages()
+							await this.postMessageToWebview({ type: "selectedImages", images })
+							break
+						case "exportCurrentTask":
+							const currentTaskId = this.cline?.taskId
+							if (currentTaskId) {
+								this.exportTaskWithId(currentTaskId)
+							}
+							break
+						case "showTaskWithId":
+							this.showTaskWithId(message.text!)
+							break
+						case "deleteTaskWithId":
+							this.deleteTaskWithId(message.text!)
+							break
+						case "exportTaskWithId":
+							this.exportTaskWithId(message.text!)
+							break
+						case "resetState":
+							await this.resetState()
+							break
+						case "requestOllamaModels":
+							const ollamaModels = await this.getOllamaModels(message.text)
+							this.postMessageToWebview({ type: "ollamaModels", ollamaModels })
+							break
+						case "requestLmStudioModels":
+							const lmStudioModels = await this.getLmStudioModels(message.text)
+							this.postMessageToWebview({ type: "lmStudioModels", lmStudioModels })
+							break
+						case "refreshOpenRouterModels":
+							await this.refreshOpenRouterModels()
+							break
+						case "openImage":
+							openImage(message.text!)
+							break
+						case "openFile":
+							openFile(message.text!)
+							break
+						case "openMention":
+							openMention(message.text)
+							break
+						case "cancelTask":
+							if (this.cline) {
+								const { historyItem } = await this.getTaskWithId(this.cline.taskId)
+								this.cline.abortTask()
+								await pWaitFor(() => this.cline === undefined || this.cline.didFinishAborting, {
+									timeout: 3_000,
+								}).catch(() => {
+									console.error("Failed to abort task")
+								})
+								if (this.cline) {
+									// 'abandoned' will prevent this cline instance from affecting future cline instance gui. this may happen if its hanging on a streaming request
+									this.cline.abandoned = true
+								}
+								await this.initClineWithHistoryItem(historyItem) // clears task again, so we need to abortTask manually above
+								// await this.postStateToWebview() // new Cline instance will post state when it's ready. having this here sent an empty messages array to webview leading to virtuoso having to reload the entire list
+							}
 
-						break
-					case "openMcpSettings": {
-						const mcpSettingsFilePath = await this.mcpHub?.getMcpSettingsFilePath()
-						if (mcpSettingsFilePath) {
-							openFile(mcpSettingsFilePath)
+							break
+						case "openMcpSettings": {
+							const mcpSettingsFilePath = await this.mcpHub?.getMcpSettingsFilePath()
+							if (mcpSettingsFilePath) {
+								openFile(mcpSettingsFilePath)
+							}
+							break
 						}
-						break
-					}
-					case "restartMcpServer": {
-						try {
-							await this.mcpHub?.restartConnection(message.text!)
-						} catch (error) {
-							console.error(`Failed to retry connection for ${message.text}:`, error)
+						case "restartMcpServer": {
+							try {
+								await this.mcpHub?.restartConnection(message.text!)
+							} catch (error) {
+								console.error(`Failed to retry connection for ${message.text}:`, error)
+							}
+							break
 						}
-						break
+						// Add more switch case statements here as more webview message commands
+						// are created within the webview context (i.e. inside media/main.js)
 					}
-					// Add more switch case statements here as more webview message commands
-					// are created within the webview context (i.e. inside media/main.js)
+				} catch (error) {
+					this.outputChannel.appendLine(`Error handling webview message: ${error.message}`)
+					throw error
 				}
 			},
 			null,
@@ -524,12 +544,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	async updateCustomInstructions(instructions?: string) {
-		// User may be clearing the field
-		await this.updateGlobalState("customInstructions", instructions || undefined)
-		if (this.cline) {
-			this.cline.customInstructions = instructions || undefined
+		try {
+			// User may be clearing the field
+			await this.updateGlobalState("customInstructions", instructions || undefined)
+			if (this.cline) {
+				this.cline.customInstructions = instructions || undefined
+			}
+			await this.postStateToWebview()
+		} catch (error) {
+			this.outputChannel.appendLine(`Error updating custom instructions: ${error.message}`)
+			throw error
 		}
-		await this.postStateToWebview()
 	}
 
 	// MCP
@@ -539,6 +564,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		try {
 			await fs.mkdir(mcpServersDir, { recursive: true })
 		} catch (error) {
+			this.outputChannel.appendLine(`Error ensuring MCP servers directory exists: ${error.message}`)
 			return "~/Documents/Cline/MCP" // in case creating a directory in documents fails for whatever reason (e.g. permissions) - this is fine since this path is only ever used in the system prompt
 		}
 		return mcpServersDir
@@ -546,7 +572,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	async ensureSettingsDirectoryExists(): Promise<string> {
 		const settingsDir = path.join(this.context.globalStorageUri.fsPath, "settings")
-		await fs.mkdir(settingsDir, { recursive: true })
+		try {
+			await fs.mkdir(settingsDir, { recursive: true })
+		} catch (error) {
+			this.outputChannel.appendLine(`Error ensuring settings directory exists: ${error.message}`)
+			throw error
+		}
 		return settingsDir
 	}
 
@@ -565,6 +596,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			const models = [...new Set<string>(modelsArray)]
 			return models
 		} catch (error) {
+			this.outputChannel.appendLine(`Error fetching Ollama models: ${error.message}`)
 			return []
 		}
 	}
@@ -584,6 +616,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			const models = [...new Set<string>(modelsArray)]
 			return models
 		} catch (error) {
+			this.outputChannel.appendLine(`Error fetching LM Studio models: ${error.message}`)
 			return []
 		}
 	}
@@ -600,7 +633,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				throw new Error("Invalid response from OpenRouter API")
 			}
 		} catch (error) {
-			console.error("Error exchanging code for API key:", error)
+			this.outputChannel.appendLine(`Error exchanging code for API key: ${error.message}`)
 			throw error
 		}
 
@@ -616,7 +649,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	private async ensureCacheDirectoryExists(): Promise<string> {
 		const cacheDir = path.join(this.context.globalStorageUri.fsPath, "cache")
-		await fs.mkdir(cacheDir, { recursive: true })
+		try {
+			await fs.mkdir(cacheDir, { recursive: true })
+		} catch (error) {
+			this.outputChannel.appendLine(`Error ensuring cache directory exists: ${error.message}`)
+			throw error
+		}
 		return cacheDir
 	}
 
@@ -627,8 +665,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		)
 		const fileExists = await fileExistsAtPath(openRouterModelsFilePath)
 		if (fileExists) {
-			const fileContents = await fs.readFile(openRouterModelsFilePath, "utf8")
-			return JSON.parse(fileContents)
+			try {
+				const fileContents = await fs.readFile(openRouterModelsFilePath, "utf8")
+				return JSON.parse(fileContents)
+			} catch (error) {
+				this.outputChannel.appendLine(`Error reading OpenRouter models: ${error.message}`)
+				throw error
+			}
 		}
 		return undefined
 	}
@@ -743,6 +786,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			await fs.writeFile(openRouterModelsFilePath, JSON.stringify(models))
 			console.log("OpenRouter models fetched and saved", models)
 		} catch (error) {
+			this.outputChannel.appendLine(`Error fetching OpenRouter models: ${error.message}`)
 			console.error("Error fetching OpenRouter models:", error)
 		}
 
@@ -885,7 +929,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	// setApiConversationHistory(history: Anthropic.MessageParam[] | undefined) {
 	// 	// await this.updateGlobalState(this.getApiConversationHistoryStateKey(), history)
-	// 	this.apiConversationHistory = history || []
+	// 	// this.apiConversationHistory = history || []
 	// }
 
 	// addMessageToApiConversationHistory(message: Anthropic.MessageParam): Anthropic.MessageParam[] {
@@ -1030,21 +1074,41 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// global
 
 	async updateGlobalState(key: GlobalStateKey, value: any) {
-		await this.context.globalState.update(key, value)
+		try {
+			await this.context.globalState.update(key, value)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error updating global state for key ${key}: ${error.message}`)
+			throw error
+		}
 	}
 
 	async getGlobalState(key: GlobalStateKey) {
-		return await this.context.globalState.get(key)
+		try {
+			return await this.context.globalState.get(key)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error getting global state for key ${key}: ${error.message}`)
+			throw error
+		}
 	}
 
 	// workspace
 
 	private async updateWorkspaceState(key: string, value: any) {
-		await this.context.workspaceState.update(key, value)
+		try {
+			await this.context.workspaceState.update(key, value)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error updating workspace state for key ${key}: ${error.message}`)
+			throw error
+		}
 	}
 
 	private async getWorkspaceState(key: string) {
-		return await this.context.workspaceState.get(key)
+		try {
+			return await this.context.workspaceState.get(key)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error getting workspace state for key ${key}: ${error.message}`)
+			throw error
+		}
 	}
 
 	// private async clearState() {
@@ -1060,44 +1124,59 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// secrets
 
 	private async storeSecret(key: SecretKey, value?: string) {
-		if (value) {
-			await this.context.secrets.store(key, value)
-		} else {
-			await this.context.secrets.delete(key)
+		try {
+			if (value) {
+				await this.context.secrets.store(key, value)
+			} else {
+				await this.context.secrets.delete(key)
+			}
+		} catch (error) {
+			this.outputChannel.appendLine(`Error storing secret for key ${key}: ${error.message}`)
+			throw error
 		}
 	}
 
 	private async getSecret(key: SecretKey) {
-		return await this.context.secrets.get(key)
+		try {
+			return await this.context.secrets.get(key)
+		} catch (error) {
+			this.outputChannel.appendLine(`Error getting secret for key ${key}: ${error.message}`)
+			throw error
+		}
 	}
 
 	// dev
 
 	async resetState() {
-		vscode.window.showInformationMessage("Resetting state...")
-		for (const key of this.context.globalState.keys()) {
-			await this.context.globalState.update(key, undefined)
+		try {
+			vscode.window.showInformationMessage("Resetting state...")
+			for (const key of this.context.globalState.keys()) {
+				await this.context.globalState.update(key, undefined)
+			}
+			const secretKeys: SecretKey[] = [
+				"apiKey",
+				"openRouterApiKey",
+				"awsAccessKey",
+				"awsSecretKey",
+				"awsSessionToken",
+				"openAiApiKey",
+				"geminiApiKey",
+				"openAiNativeApiKey",
+				"deepSeekApiKey",
+			]
+			for (const key of secretKeys) {
+				await this.storeSecret(key, undefined)
+			}
+			if (this.cline) {
+				this.cline.abortTask()
+				this.cline = undefined
+			}
+			vscode.window.showInformationMessage("State reset")
+			await this.postStateToWebview()
+			await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		} catch (error) {
+			this.outputChannel.appendLine(`Error resetting state: ${error.message}`)
+			throw error
 		}
-		const secretKeys: SecretKey[] = [
-			"apiKey",
-			"openRouterApiKey",
-			"awsAccessKey",
-			"awsSecretKey",
-			"awsSessionToken",
-			"openAiApiKey",
-			"geminiApiKey",
-			"openAiNativeApiKey",
-			"deepSeekApiKey",
-		]
-		for (const key of secretKeys) {
-			await this.storeSecret(key, undefined)
-		}
-		if (this.cline) {
-			this.cline.abortTask()
-			this.cline = undefined
-		}
-		vscode.window.showInformationMessage("State reset")
-		await this.postStateToWebview()
-		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 	}
 }

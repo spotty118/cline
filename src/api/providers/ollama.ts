@@ -23,20 +23,25 @@ export class OllamaHandler implements ApiHandler {
 			...convertToOpenAiMessages(messages),
 		]
 
-		const stream = await this.client.chat.completions.create({
-			model: this.getModel().id,
-			messages: openAiMessages,
-			temperature: 0,
-			stream: true,
-		})
-		for await (const chunk of stream) {
-			const delta = chunk.choices[0]?.delta
-			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+		try {
+			const stream = await this.client.chat.completions.create({
+				model: this.getModel().id,
+				messages: openAiMessages,
+				temperature: 0,
+				stream: true,
+			})
+			for await (const chunk of stream) {
+				const delta = chunk.choices[0]?.delta
+				if (delta?.content) {
+					yield {
+						type: "text",
+						text: delta.content,
+					}
 				}
 			}
+		} catch (error) {
+			console.error("Error creating message:", error)
+			throw error
 		}
 	}
 
