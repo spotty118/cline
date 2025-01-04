@@ -42,7 +42,6 @@ export class OpenRouterHandler implements ApiHandler {
 			case "anthropic/claude-3-5-haiku-20241022":
 			case "anthropic/claude-3-5-haiku-20241022:beta":
 			case "anthropic/claude-3-haiku":
-			case "anthropic/claude-3-haiku:beta":
 			case "anthropic/claude-3-opus":
 			case "anthropic/claude-3-opus:beta":
 				openAiMessages[0] = {

@@ -45,59 +45,64 @@ export class AwsBedrockHandler implements ApiHandler {
 			modelId = this.getModel().id
 		}
 
-		const stream = await this.client.messages.create({
-			model: modelId,
-			max_tokens: this.getModel().info.maxTokens || 8192,
-			temperature: 0,
-			system: systemPrompt,
-			messages,
-			stream: true,
-		})
-		for await (const chunk of stream) {
-			switch (chunk.type) {
-				case "message_start":
-					const usage = chunk.message.usage
-					yield {
-						type: "usage",
-						inputTokens: usage.input_tokens || 0,
-						outputTokens: usage.output_tokens || 0,
-					}
-					break
-				case "message_delta":
-					yield {
-						type: "usage",
-						inputTokens: 0,
-						outputTokens: chunk.usage.output_tokens || 0,
-					}
-					break
+		try {
+			const stream = await this.client.messages.create({
+				model: modelId,
+				max_tokens: this.getModel().info.maxTokens || 8192,
+				temperature: 0,
+				system: systemPrompt,
+				messages,
+				stream: true,
+			})
+			for await (const chunk of stream) {
+				switch (chunk.type) {
+					case "message_start":
+						const usage = chunk.message.usage
+						yield {
+							type: "usage",
+							inputTokens: usage.input_tokens || 0,
+							outputTokens: usage.output_tokens || 0,
+						}
+						break
+					case "message_delta":
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: chunk.usage.output_tokens || 0,
+						}
+						break
 
-				case "content_block_start":
-					switch (chunk.content_block.type) {
-						case "text":
-							if (chunk.index > 0) {
+					case "content_block_start":
+						switch (chunk.content_block.type) {
+							case "text":
+								if (chunk.index > 0) {
+									yield {
+										type: "text",
+										text: "\n",
+									}
+								}
 								yield {
 									type: "text",
-									text: "\n",
+									text: chunk.content_block.text,
 								}
-							}
-							yield {
-								type: "text",
-								text: chunk.content_block.text,
-							}
-							break
-					}
-					break
-				case "content_block_delta":
-					switch (chunk.delta.type) {
-						case "text_delta":
-							yield {
-								type: "text",
-								text: chunk.delta.text,
-							}
-							break
-					}
-					break
+								break
+						}
+						break
+					case "content_block_delta":
+						switch (chunk.delta.type) {
+							case "text_delta":
+								yield {
+									type: "text",
+									text: chunk.delta.text,
+								}
+								break
+						}
+						break
+				}
 			}
+		} catch (error) {
+			console.error("Error creating message:", error)
+			throw error
 		}
 	}
 
