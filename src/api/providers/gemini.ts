@@ -18,30 +18,35 @@ export class GeminiHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		const model = this.client.getGenerativeModel({
-			model: this.getModel().id,
-			systemInstruction: systemPrompt,
-		})
-		const result = await model.generateContentStream({
-			contents: messages.map(convertAnthropicMessageToGemini),
-			generationConfig: {
-				// maxOutputTokens: this.getModel().info.maxTokens,
-				temperature: 0,
-			},
-		})
+		try {
+			const model = this.client.getGenerativeModel({
+				model: this.getModel().id,
+				systemInstruction: systemPrompt,
+			})
+			const result = await model.generateContentStream({
+				contents: messages.map(convertAnthropicMessageToGemini),
+				generationConfig: {
+					// maxOutputTokens: this.getModel().info.maxTokens,
+					temperature: 0,
+				},
+			})
 
-		for await (const chunk of result.stream) {
-			yield {
-				type: "text",
-				text: chunk.text(),
+			for await (const chunk of result.stream) {
+				yield {
+					type: "text",
+					text: chunk.text(),
+				}
 			}
-		}
 
-		const response = await result.response
-		yield {
-			type: "usage",
-			inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
-			outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+			const response = await result.response
+			yield {
+				type: "usage",
+				inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
+				outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+			}
+		} catch (error) {
+			console.error("Error creating message:", error)
+			throw error
 		}
 	}
 
